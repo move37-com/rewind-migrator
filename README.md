@@ -9,4 +9,4 @@ This is an automated tool for migrating Rewind.ai data into ReMyndAI.
 git clone https://github.com/move37-com/rewind-migrator.git && cd rewind-migrator && python3 rewind-migrator.py
 ```
 
-You will be guided through the steps to import your data!
+That's it! You will be guided through the steps to import your data.
