@@ -46,9 +46,21 @@ def log_error(message: str) -> None:
     print(f"{red}ERROR{reset}: {message}", file=sys.stderr)
 
 
-def log_section(title: str) -> None:
+def log_section(title: str, status: Optional[bool] = None) -> None:
+    if status is True:
+        title = f"{title} ✅"
+    elif status is False:
+        title = f"{title} ❌"
     line = "-" * len(title)
     print(f"\n{title}\n{line}")
+
+
+def log_check_item(label: str, status: Optional[bool] = None) -> None:
+    if status is None:
+        print(f"- {label}")
+        return
+    icon = "✅" if status else "❌"
+    print(f"- {label} {icon}")
 
 
 def progress_update(label: str, current: int, total: int) -> None:
@@ -96,7 +108,7 @@ def is_remynd_running() -> bool:
         if not osascript:
             log_info("osascript not found; cannot auto-detect running apps.")
             return False
-        for name in ("ReMynd", "ReMynd AI"):
+        for name in ("ReMynd",):
             result = subprocess.run(
                 [osascript, "-e", f'application "{name}" is running'],
                 capture_output=True,
@@ -121,19 +133,21 @@ def is_remynd_running() -> bool:
 
 def ensure_remynd_not_running() -> bool:
     if not sys.stdin.isatty():
-        log_error("This session is not interactive. Please close ReMynd AI and try again.")
+        log_error("This session is not interactive. Please close ReMyndAI and try again.")
         return False
     if not shutil.which("pgrep") and not shutil.which("osascript"):
-        log_section("IMPORTANT: Close ReMynd AI")
+        log_section("IMPORTANT: Close ReMyndAI")
         response = input(
-            "Please quit ReMynd AI before continuing.\n"
+            "Please quit ReMyndAI before continuing.\n"
             "Type YES to confirm it is closed: "
         ).strip().lower()
-        return response == "yes"
+        if response == "yes":
+            return True
+        return False
     while is_remynd_running():
-        log_section("IMPORTANT: Close ReMynd AI")
-        print("ReMynd AI appears to be running. Please quit the app before continuing.")
-        input("Press Enter once ReMynd AI is closed...")
+        log_section("IMPORTANT: Close ReMyndAI")
+        print("ReMyndAI appears to be running. Please quit the app before continuing.")
+        input("Press Enter once ReMyndAI is closed...")
     return True
 
 
@@ -427,24 +441,26 @@ def get_disk_free_bytes(path: Path) -> int:
 
 def show_welcome() -> None:
     print("""
-  _____      __  __                 _            _____ 
- |  __ \    |  \/  |               | |     /\   |_   _|
- | |__) |___| \  / |_   _ _ __   __| |    /  \    | |  
- |  _  // _ \ |\/| | | | | '_ \ / _` |   / /\ \   | |  
- | | \ \  __/ |  | | |_| | | | | (_| |  / ____ \ _| |_ 
- |_|  \_\___|_|  |_|\__, |_| |_|\__,_| /_/    \_\_____|
+  _____      __  __                 _           _____ 
+ |  __ \    |  \/  |               | |    /\   |_   _|
+ | |__) |___| \  / |_   _ _ __   __| |   /  \    | |  
+ |  _  // _ \ |\/| | | | | '_ \ / _` |  / /\ \   | |  
+ | | \ \  __/ |  | | |_| | | | | (_| | / ____ \ _| |_ 
+ |_|  \_\___|_|  |_|\__, |_| |_|\__,_|/_/    \_\_____|
                      __/ |                             
                     |___/                                
     """)
     print("")
-    title = "Rewind.ai -> ReMynd AI Migration Tool"
+    title = "Rewind.ai -> ReMyndAI Migration Tool"
     print(title)
     print("-" * len(title))
     print("")
-    print("This tool will analyze your Rewind.ai data and import it into ReMynd AI.")
+    print("This tool will analyze your Rewind.ai data and import it into ReMyndAI.")
 
 
 def prompt_to_analyze() -> bool:
+    log_section("Analyze Rewind.ai data")
+    print("This will analyze your Rewind.ai data and provide a summary of what will be imported.")
     if not sys.stdin.isatty():
         log_error("This session is not interactive. Aborting before migration.")
         return False
@@ -457,20 +473,32 @@ def prompt_to_analyze() -> bool:
     return True
 
 
-def prompt_to_migrate(
+def show_import_summary(
     video_seconds: float,
     call_count: int,
     video_count: int,
     window_count: int,
     web_visit_count: int,
-) -> bool:
+) -> None:
     hours = video_seconds / 3600.0 if video_seconds else 0.0
-    log_section("Import Summary")
-    print(f"Videos to import: {video_count} (~{hours:.2f} hours)")
-    print(f"Call recordings:  {call_count}")
-    print(f"Windows to import: {window_count}")
-    print(f"Web visits:        {web_visit_count}")
-    print("")
+    log_info("\nImport Summary")
+    rows = [
+        ("Videos to import", f"{video_count} (~{hours:.2f} hours)"),
+        ("Call recordings", str(call_count)),
+        ("Windows to import", str(window_count)),
+        ("Web visits", str(web_visit_count)),
+    ]
+    label_width = max(len(label) for label, _ in rows)
+    value_width = max(len(value) for _, value in rows)
+    total_width = label_width + value_width + 5
+    top = "+" + "-" * total_width + "+"
+    print(top)
+    for label, value in rows:
+        print(f"| {label:<{label_width}} | {value:<{value_width}} |")
+    print(top)
+
+
+def prompt_to_migrate() -> bool:
     response = input("Continue with migration? [y/N]: ").strip().lower()
     if response in {"y", "yes"}:
         return True
@@ -640,7 +668,7 @@ def migrate_calls(
     overwrite: bool,
     link: bool,
     transfer_mode: str,
-) -> None:
+) -> int:
     extras_root = remynd_root / "Recordings" / "Extras"
     call_monitor_root = extras_root / "CallMonitor"
     extras_db_path = extras_root / "extras.db"
@@ -649,7 +677,7 @@ def migrate_calls(
         extras_conn: Optional[sqlite3.Connection] = open_extras_db(extras_db_path)
     except RuntimeError as exc:
         log_error(str(exc))
-        return
+        return 0
     extras_conn.row_factory = sqlite3.Row
 
     try:
@@ -775,13 +803,13 @@ def migrate_calls(
 
             inserted += 1
 
-        log_info(
-            f"Call import complete. Imported={inserted}, skipped={skipped}, missing audio={missing}."
-        )
+        log_info("Call import complete ✅")
+        return inserted
     finally:
         if extras_conn is not None:
             extras_conn.commit()
             extras_conn.close()
+    return 0
 
 
 def migrate_focused_windows(
@@ -789,11 +817,11 @@ def migrate_focused_windows(
     conn: sqlite3.Connection,
     tz_cfg: TzConfig,
     overwrite: bool,
-) -> None:
+) -> tuple[int, int]:
     app_db_path = remynd_root / "Recordings" / "app.db"
     if not app_db_path.is_file():
-        log_error(f"Could not find ReMynd AI database: {app_db_path}")
-        return
+        log_error(f"Could not find ReMyndAI database: {app_db_path}")
+        return (0, 0)
 
     remynd_conn = sqlite3.connect(str(app_db_path))
     remynd_conn.row_factory = sqlite3.Row
@@ -805,13 +833,13 @@ def migrate_focused_windows(
         ).fetchone()
         if not has_table:
             log_error("Required window data table not found in app.db.")
-            return
+            return (0, 0)
         has_window_table = remynd_conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ApplicationWindow'"
         ).fetchone()
         if not has_window_table:
             log_error("Required window data table not found in app.db.")
-            return
+            return (0, 0)
 
         total = remynd_conn.execute("SELECT COUNT(*) FROM FocusedWindow").fetchone()[0]
         if total and overwrite:
@@ -892,11 +920,11 @@ def migrate_focused_windows(
 
         if segment_total == 0:
             log_info("No window data found.")
-            return
+            return (0, 0)
 
         total_steps = segment_total + len(window_entries) + (len(app_rows) * 2)
         progress_current = 0
-        log_info(f"Found {len(window_entries)} windows to import.")
+        log_info(f"Found {total_steps} windows to import.")
 
         app_inserted = app_existing = 0
         run_inserted = run_skipped = run_deleted = 0
@@ -985,7 +1013,7 @@ def migrate_focused_windows(
 
         remynd_conn.commit()
 
-        inserted = skipped = invalid = 0
+        focused_inserted = skipped = invalid = 0
         cursor = conn.execute(
             """
             SELECT startDate, endDate, bundleID, windowName, browserUrl
@@ -1071,7 +1099,7 @@ def migrate_focused_windows(
                     ended_at,
                 ),
             )
-            inserted += 1
+            focused_inserted += 1
 
         remynd_conn.commit()
 
@@ -1098,7 +1126,7 @@ def migrate_focused_windows(
             log_warn("Could not determine screen size; bounds will be 0x0.")
         bounds_str = f"[[0,0],[{max_width // 2},{max_height // 2}]]"
 
-        inserted = skipped = deleted = 0
+        window_inserted = skipped = deleted = 0
         window_id_by_key: dict[tuple[str | None, str | None, datetime.date], int] = {}
         next_window_number = 100
         for key, entry in window_entries.items():
@@ -1177,11 +1205,11 @@ def migrate_focused_windows(
             )
             window_id = int(remynd_conn.execute("SELECT last_insert_rowid()").fetchone()[0])
             window_id_by_key[key] = window_id
-            inserted += 1
+            window_inserted += 1
             next_window_number += 1
 
         remynd_conn.commit()
-        log_info("Window data import complete.")
+        log_info("Window data import complete ✅")
 
         browser_rows = conn.execute(
             """
@@ -1411,18 +1439,18 @@ def migrate_focused_windows(
             visit_inserted += 1
 
         remynd_conn.commit()
-        log_info(
-            f"Web history complete. inserted={visit_inserted}, skipped={visit_skipped}, missing={visit_missing}, total={visit_total}."
-        )
+        log_info("Web history complete ✅")
+        return (window_inserted, visit_inserted)
     finally:
         remynd_conn.close()
+    return (0, 0)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Migrate Rewind.ai video files, frame metadata, calls, and focused windows "
-            "into ReMynd AI databases."
+            "into ReMyndAI databases."
         ),
     )
     parser.add_argument(
@@ -1433,10 +1461,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--remynd-root",
         default="~/Library/Application Support/Move37/ReMynd",
-        help="Path to ReMynd AI Application Support root (Move37/ReMynd)",
+        help="Path to ReMyndAI Application Support root (Move37/ReMynd)",
     )
     parser.add_argument("--input-tz", default="UTC", help="Timezone to interpret Rewind.ai timestamps")
-    parser.add_argument("--output-tz", default="UTC", help="Timezone to write ReMynd AI timestamps")
+    parser.add_argument("--output-tz", default="UTC", help="Timezone to write ReMyndAI timestamps")
     parser.add_argument("--limit", type=int, default=0, help="Max videos to process (0 = all)")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing folders")
     parser.add_argument("--link", action="store_true", help="Hardlink video files instead of copying")
@@ -1488,36 +1516,51 @@ def main() -> int:
     extras_db_path = extras_root / "extras.db"
     app_db_path = output_root / "app.db"
 
+    log_section("Performing initial checks...")
+
+    rewind_errors: list[str] = []
     if not rewind_chunks.is_dir():
-        log_error(f"Couldn't find Rewind.ai chunks folder: {rewind_chunks}")
+        rewind_errors.append(f"Couldn't find Rewind.ai captured frames folder: {rewind_chunks}")
+    if not rewind_db_enc.is_file():
+        rewind_errors.append(f"Couldn't find Rewind.ai database: {rewind_db_enc}")
+    if rewind_errors:
+        log_check_item("Rewind.ai Data Check", False)
+        for message in rewind_errors:
+            log_error(message)
         return 2
+    log_check_item("Rewind.ai Data Check", True)
 
     tz_cfg = TzConfig(
         input_tz=resolve_tz(args.input_tz),
         output_tz=resolve_tz(args.output_tz),
     )
 
-    if not rewind_db_enc.is_file():
-        log_error(f"Couldn't find encrypted Rewind.ai database: {rewind_db_enc}")
-        return 2
-
     if (
         not remynd_root.is_dir()
         or not output_root.is_dir()
         or not extras_root.is_dir()
-        or not call_monitor_root.is_dir()
         or not app_db_path.is_file()
         or not extras_db_path.is_file()
     ):
-        print() # Empty line
+        log_check_item("ReMyndAI Installation", False)
         log_error(
-            "An existing ReMynd AI installation was not found!\n"
-            "Please launch ReMynd AI first and create an account, "
-            "then run this script again to migrate your Rewind.ai data.\n"
+            "An existing ReMyndAI installation was not found. "
+            "Please launch ReMyndAI first and create an account, "
+            "then run this script again to migrate your Rewind.ai data."
         )
         return 2
+    log_check_item("ReMyndAI Installation", True)
 
-    if not ensure_remynd_not_running():
+    if not call_monitor_root.exists():
+        try:
+            call_monitor_root.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            log_error(f"Failed to create CallMonitor folder: {exc}")
+            return 2
+
+    remynd_closed = ensure_remynd_not_running()
+    log_check_item("ReMyndAI Check", remynd_closed)
+    if not remynd_closed:
         return 0
 
     if not prompt_to_analyze():
@@ -1526,20 +1569,24 @@ def main() -> int:
     tmpdir_ctx = tempfile.TemporaryDirectory(prefix="rewind_migrate_")
     tmpdir = Path(tmpdir_ctx.name)
     rewind_db = tmpdir / "rewind.sqlite3"
+    log_info("\nDecrypting your Rewind.ai database...")
     try:
-        log_section("Preparing Database")
-        log_info("Decrypting your Rewind.ai database...")
         decrypt_database(rewind_db_enc, rewind_db)
     except Exception as exc:
+        log_check_item("Preparing Database", status=False)
         log_error(str(exc))
         tmpdir_ctx.cleanup()
         return 2
+    # log_section("Preparing Database", status=True)
 
     conn = sqlite3.connect(str(rewind_db))
     conn.row_factory = sqlite3.Row
+    processed = 0
+    call_imported = 0
+    window_imported = 0
+    web_visit_imported = 0
     try:
-        log_section("Analyzing Data")
-        log_info("Calculating how much data will be imported...")
+        # log_info("Calculating how much data will be imported...")
         limit_clause = f"LIMIT {args.limit}" if args.limit and args.limit > 0 else ""
         has_file_size = table_has_column(conn, "video", "fileSize")
         select_fields = "id, path, width, height"
@@ -1550,6 +1597,7 @@ def main() -> int:
         ).fetchall()
 
         total = len(videos)
+        analysis_video_total = total
         video_ids = [int(row["id"]) for row in videos]
         call_count = conn.execute(
             "SELECT COUNT(DISTINCT startTime) FROM audio"
@@ -1562,41 +1610,60 @@ def main() -> int:
             WHERE browserUrl IS NOT NULL AND browserUrl != ''
             """
         ).fetchone()[0]
+        analysis_call_total = int(call_count)
+        analysis_window_total = int(window_count)
+        analysis_web_total = int(web_visit_count)
         total_seconds = compute_video_seconds(conn, video_ids, tz_cfg)
+
+        show_import_summary(
+            total_seconds,
+            analysis_call_total,
+            analysis_video_total,
+            analysis_window_total,
+            analysis_web_total,
+        )
+
+        transfer_mode = prompt_video_transfer_mode()
+        if transfer_mode is None:
+            return 0
+
         video_bytes, missing_video_files = compute_video_bytes(
             videos, rewind_chunks, has_file_size
         )
         audio_bytes, missing_audio_files = compute_audio_bytes(conn, rewind_root)
-        required_bytes = (10 * 1024**3) + video_bytes + audio_bytes
+        db_bytes = rewind_db_enc.stat().st_size
+        media_bytes = video_bytes + audio_bytes
+        required_bytes = db_bytes if transfer_mode == "move" else (db_bytes + media_bytes)
         free_bytes = get_disk_free_bytes(output_root)
 
-        log_section("Disk Space Check")
-        print(
-            "Estimated media size: "
-            f"{format_bytes(video_bytes + audio_bytes)} "
-            f"(video {format_bytes(video_bytes)}, audio {format_bytes(audio_bytes)})"
-        )
-        print(f"Required free space:  {format_bytes(required_bytes)}")
-        print(f"Available space:      {format_bytes(free_bytes)}")
+        disk_ok = free_bytes >= required_bytes
+        space_status = "✅" if disk_ok else "❌"
+        log_section("Disk Space Summary", status=disk_ok)
+        media_total = format_bytes(video_bytes + audio_bytes)
+        media_detail = f"{format_bytes(video_bytes)} video, {format_bytes(audio_bytes)} audio"
+        rows = [
+            ("Estimated media size", f"{media_total} ({media_detail})"),
+            ("Estimated history data size", format_bytes(db_bytes)),
+            ("Required free space", format_bytes(required_bytes)),
+            ("Available space", f"{format_bytes(free_bytes)} {space_status}"),
+        ]
+        label_width = max(len(label) for label, _ in rows)
+        value_width = max(len(value) for _, value in rows)
+        total_width = label_width + value_width + 5
+        top = "+" + "-" * total_width + "+"
+        print(top)
+        for label, value in rows:
+            print(f"| {label:<{label_width}} | {value:<{value_width}} |")
+        print(top)
         if missing_video_files or missing_audio_files:
             log_info(
                 "Note: Some media files were missing; the estimate may be low."
             )
-        if free_bytes < required_bytes:
+        if not disk_ok:
             log_error("Not enough free space to proceed with migration.")
             return 2
 
-        if not prompt_to_migrate(
-            total_seconds,
-            int(call_count),
-            total,
-            int(window_count),
-            int(web_visit_count),
-        ):
-            return 0
-
-        transfer_mode = prompt_video_transfer_mode()
-        if transfer_mode is None:
+        if not prompt_to_migrate():
             return 0
 
         processed = skipped = missing = 0
@@ -1655,7 +1722,8 @@ def main() -> int:
             checked_path.write_text("OK", encoding="utf-8")
 
             processed += 1
-        migrate_calls(
+        log_info("Video import complete ✅")
+        call_imported = migrate_calls(
             rewind_root=rewind_root,
             remynd_root=remynd_root,
             conn=conn,
@@ -1664,7 +1732,7 @@ def main() -> int:
             link=args.link,
             transfer_mode=transfer_mode,
         )
-        migrate_focused_windows(
+        window_imported, web_visit_imported = migrate_focused_windows(
             remynd_root=remynd_root,
             conn=conn,
             tz_cfg=tz_cfg,
@@ -1675,10 +1743,26 @@ def main() -> int:
         if tmpdir_ctx is not None:
             tmpdir_ctx.cleanup()
 
-    print("\n+--------------------+")
-    print("| Migration Complete |")
-    print("+--------------------+")
-    print("You can now launch ReMynd AI to see your imported data.")
+    log_info("\n🚀 Migration Complete!")
+    summary_videos = processed if processed else analysis_video_total
+    summary_calls = call_imported if call_imported else analysis_call_total
+    summary_windows = window_imported if window_imported else analysis_window_total
+    summary_web = web_visit_imported if web_visit_imported else analysis_web_total
+    rows = [
+        ("Videos imported", str(summary_videos)),
+        ("Call recordings", str(summary_calls)),
+        ("Windows imported", str(summary_windows)),
+        ("Web visits", str(summary_web)),
+    ]
+    label_width = max(len(label) for label, _ in rows)
+    value_width = max(len(value) for _, value in rows)
+    total_width = label_width + value_width + 5
+    top = "+" + "-" * total_width + "+"
+    print(top)
+    for label, value in rows:
+        print(f"| {label:<{label_width}} | {value:<{value_width}} |")
+    print(top)
+    print("You can now launch ReMyndAI to see your imported data.\n")
     return 0
 
 
