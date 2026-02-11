@@ -6,5 +6,5 @@ Automated tool for Rewind.ai -> ReMynd AI data migration
 2. Run:
 
 ```bash
-git clone https://github.com/move37-com/rewind-migrator.git && cd remind-migrator && python3 remind-migrator.py
+git clone https://github.com/move37-com/rewind-migrator.git && cd rewind-migrator && python3 rewind-migrator.py
 ```
